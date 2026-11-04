@@ -275,3 +275,8 @@ can add it here.
 
 Thanks to [Ayush Somani](https://ayushsomani.me/) for reserving the
 `bend-lang` name for us.
+
+
+## Experimental: batch-128 checking
+
+Based on Bend 2.0.36, this opt-in module and paged-checker snapshot groups up to 128 events. One mobile check passed in 96.8 seconds at 2,768,116 KiB RSS; it reused an existing bridge and did not emit it. Its one-event predecessor was OOM-killed under the 3.7 GB compiler cap. Hub and web trials also OOM-killed under that cap while storing accepted results. This is not a complete build or an independently established performance comparison.

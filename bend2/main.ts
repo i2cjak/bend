@@ -23,6 +23,9 @@ import type { BunPlugin } from "bun";
 import * as Bend from "./bend.ts";
 import * as Comp from "./comp.ts";
 import * as Safe from "./safe.ts";
+import { profile } from "./profile.ts";
+import { check_modules, FullBookRequired } from "./modules.ts";
+import { term_refs, checked_refs } from "./references.ts";
 
 // Main
 // ====
@@ -300,7 +303,7 @@ async function cli_file(args: string[]): Promise<void> {
       return await cli_checkup(file);
     }
     const seen = new Map<string, string | null>();
-    const book = await book_read(file, undefined, seen);
+    const book = await book_read(file, undefined, seen, only && !verdict);
     if (only || verdict) {
       process.exitCode = cli_verdict(book, verdict);
       return;
@@ -360,6 +363,7 @@ function path_real(p: string): string {
 }
 
 function cli_emit(book: Bend.Book, out: string): void {
+  profile("emit:start", {out});
   if (out.endsWith(".mjs")) {
     fs.writeFileSync(out, Comp.js_lib(book, true));
   } else if (/\.c?js$/.test(out)) {
@@ -478,6 +482,7 @@ function cli_base(what?: string): void {
 }
 
 async function cli_bundle(page: string, dir: string): Promise<void> {
+  profile("bundle:start", {page});
   const out = await Bun.build({
     entrypoints: [page],
     outdir: dir,
@@ -485,6 +490,7 @@ async function cli_bundle(page: string, dir: string): Promise<void> {
     minify: true,
     plugins: [PLUGIN],
   });
+  profile("bundle:end", {page, outputs:out.outputs.length});
   for (const a of out.outputs) {
     cli_say(1, a.path + " (" + (a.size / 1024).toFixed(1) + "kb)\n");
   }
@@ -759,8 +765,10 @@ function book_promises(book: Bend.Book): string[] {
       for (const c of t.$ === "ADT" ? [t, ...t.c] : [t]) {
         term_refs(Bend.term_lower(c.T), rs);
       }
-      if (t.$ === "Def" && t.e !== undefined) {
-        term_refs(t.e, rs);
+      if (t.$ === "Def") {
+        const saved = checked_refs(t);
+        if (saved !== undefined) for (const ref of saved) rs.add(ref);
+        else if (t.e !== undefined) term_refs(t.e, rs);
       }
       for (const r of rs) {
         (uses[r] ??= []).push(k);
@@ -772,24 +780,6 @@ function book_promises(book: Bend.Book): string[] {
     uses[k]?.forEach((j) => bad.add(j));
   }
   return own.filter((k) => bad.has(k));
-}
-
-// term_refs adds to out the names a term (a span skipped) refers to.
-function term_refs(t: object, out: Set<string>): void {
-  const seen = new Set([t]);
-  for (const todo = [t]; todo.length > 0;) {
-    const x = todo.pop() as Record<string, unknown>;
-    if ((x.$ === "Ref" || x.$ === "ADT") && typeof x.k === "string") {
-      out.add(x.k);
-    }
-    for (const f in x) {
-      const v = x[f];
-      if (f !== "s" && typeof v === "object" && v !== null && !seen.has(v)) {
-        seen.add(v);
-        todo.push(v);
-      }
-    }
-  }
 }
 
 // cli_say writes text to fd, and drops it if the reader has left (EPIPE).
@@ -812,19 +802,36 @@ function cli_fail(msg: string): never {
 // ====
 
 async function book_read(file: string, base?: Bend.Book,
-  seen = new Map<string, string | null>()): Promise<Bend.Book> {
-  const book = base === undefined ? Bend.book_nil() : book_seed(base);
+  seen = new Map<string, string | null>(), discardResults = false): Promise<Bend.Book> {
+  let book = base === undefined ? Bend.book_nil() : book_seed(base);
   if (base !== undefined) {
     seen.set(BASE, "");
   }
   try {
-    await Bend.book_load(book, file, "", seen);
+    profile("load:start", {file});
+    let checked = false;
+    if (process.env.BP_BEND_MODULES === "1") {
+      const initial = new Map(seen);
+      try {
+        checked = await check_modules(book, file, seen, discardResults);
+      } catch (error) {
+        if (!(error instanceof FullBookRequired)) throw error;
+        book = base === undefined ? Bend.book_nil() : book_seed(base);
+        seen.clear();
+        for (const [name, ns] of initial) seen.set(name, ns);
+        profile("modules:fallback", {file});
+      }
+    }
+    if (!checked) await Bend.book_load(book, file, "", seen);
+    profile("load:end", {file, files:seen.size, definitions:Object.keys(book.tlds).length, order:book.order.length});
     const laws = path.join(path.dirname(file), "LAWS.bend");
     if (path.basename(file) === "PROOF.bend" && fs.existsSync(laws)
       && !seen.has(fs.realpathSync(laws))) {
       throw "Error: PROOF.bend must import ./LAWS.bend";
     }
-    Bend.book_valid(book, base?.order.length ?? 0);
+    profile("check:start", {file});
+    if (!checked) Bend.book_valid(book, base?.order.length ?? 0);
+    profile("check:end", {file});
     if (book.hols > 0) {
       throw "Error: " + String(book.hols) + " TODO" + (book.hols === 1 ? "" : "s")
         + " found.\nThe code is incomplete, and not a valid proof yet.";
@@ -843,7 +850,7 @@ class Check_Fail {
 function book_seed(base: Bend.Book): Bend.Book {
   const book = Bend.book_nil();
   for (const k of Object.keys(base.tlds)) {
-    book.tlds[k] = { ...base.tlds[k] };
+    book.tlds[k] = Object.defineProperties({}, Object.getOwnPropertyDescriptors(base.tlds[k])) as Bend.TLD;
   }
   Object.assign(book.ctrs, base.ctrs);
   for (const k of Object.keys(base.tmps)) {
