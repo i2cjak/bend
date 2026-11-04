@@ -275,3 +275,8 @@ can add it here.
 
 Thanks to [Ayush Somani](https://ayushsomani.me/) for reserving the
 `bend-lang` name for us.
+
+
+## Experimental: separate compilation design
+
+See [the design notes](docs/separate-compilation-experiment.md). This is research, not an implementation or a qualified compiler. Small in-process fixtures exposed order-sensitive law fills and collisions between independently generated template names. Checked dependencies, exact prefix state, cross-process interfaces and output linking are unresolved.
