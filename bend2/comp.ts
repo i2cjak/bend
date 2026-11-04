@@ -2962,6 +2962,13 @@ function js_key(n: Name): string {
 }
 
 function js_expr(sc: Scope, tm: HTerm, ty0: HTerm | null): string {
+  // A checked numeric literal already holds the native word. Taking its
+  // constructor view allocates a 32-bit tree only to read that word back.
+  const literal = Bend.term_strip(tm);
+  if (literal.$ === "Lit" && (literal.k === "U32" || literal.k === "F32")) {
+    const v = literal.k === "F32" ? Bend.f32_from_bits(literal.v) : literal.v;
+    return Object.is(v, -0) ? "-0" : String(v);
+  }
   const [x, ty] = ty_peel(tm, ty0);
   switch (x.$) {
     case "Var": {
