@@ -275,3 +275,8 @@ can add it here.
 
 Thanks to [Ayush Somani](https://ayushsomani.me/) for reserving the
 `bend-lang` name for us.
+
+
+## Experimental: paged checked bodies
+
+Based on Bend 2.0.36. This opt-in research prototype pages checked terms and revalidates backing data; it is not a release compiler or proof cache. A focused emit and a mobile check passed with the experimental toolchain; mobile used about 2.6 GiB RSS but took 149.6 seconds in the V21 trial. Full hub and web trials did not qualify: the hub timed out and web was OOM-killed under a 3.7 GB compiler cap. The post-trial revalidation correction in this branch has not itself received those full runs.

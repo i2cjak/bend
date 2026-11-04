@@ -11,6 +11,8 @@
 import * as fs from "node:fs";
 
 import * as Bend from "./bend.ts";
+import { profile } from "./profile.ts";
+import { stored_body } from "./offload.ts";
 
 // Types
 // =====
@@ -530,6 +532,19 @@ const PROBES: Of<"Var">[] = [];
 const DUMMY = probe("~");
 
 let FUEL = 0;
+const JS_BODIES = new Map<Name, HTerm | null>();
+function js_body(k: Name): HTerm | null {
+  if (JS_BODIES.has(k)) {
+    const value = JS_BODIES.get(k)!; JS_BODIES.delete(k); JS_BODIES.set(k, value);
+    return value;
+  }
+  const def = FL.book.tlds[k];
+  const term = def?.$ === "Def" ? def.e : undefined;
+  const value = term === undefined ? null : Bend.term_higher(term);
+  JS_BODIES.set(k, value);
+  while (JS_BODIES.size > 64) JS_BODIES.delete(JS_BODIES.keys().next().value!);
+  return value;
+}
 
 // The book being compiled and all that is memoized about it.
 let FL: File;
@@ -1177,6 +1192,10 @@ function mat_ops(eq: (k: Name) => string): string {
 // def it calls have no fork, no bang call and only tail self-calls.
 // loop_of gives a def's tail cycle (Tarjan over its tail callees).
 
+function bounded_fun(k: Name, info: Omit<Fun, "h">): Fun {
+  return Object.defineProperty(info, "h", { get: () => js_body(k) }) as Fun;
+}
+
 function fun_of(k: Name): Fun {
   return memo(FL.funs, k, () => {
     const tld = FL.book.tlds[k];
@@ -1184,7 +1203,8 @@ function fun_of(k: Name): Fun {
       return { n: 0, h: null, live: [], lays: [BOX, BOX], ret: BOX };
     }
     const doms = tele_unbind(tld.T).doms;
-    const h = tld.e ? Bend.term_higher(tld.e) : null;
+    const paged = FL.js && process.env.BP_BEND_PAGED === "1";
+    const h = paged ? js_body(k) : tld.e ? Bend.term_higher(tld.e) : null;
     const n = tld.n + (h === null ? 0
       : Math.min(def_raise(h, tld.n), doms.length - tld.n));
     const live = doms.slice(0, n).filter(dom_live);
@@ -1195,8 +1215,9 @@ function fun_of(k: Name): Fun {
     const ret = lay_of(Bend.tele_fill(FL.book, tld.T,
       Array(n).fill(DUMMY), Bend.ctx_nil()));
     const wide = lays.flatMap((l) => l.ks).length > WIDE;
-    return { n, h, live, lays: lays.map((l) => wide && l.ks.length > 1 ? BOX
+    const info = { n, live, lays: lays.map((l) => wide && l.ks.length > 1 ? BOX
       : l), ret: ret.ks.length === 0 ? BOX : ret };
+    return paged ? bounded_fun(k, info) : { ...info, h };
   });
 }
 
@@ -1228,7 +1249,7 @@ function def_foreign(tld: Bend.TLD | undefined):
 }
 
 function done_live(tld: Bend.TLD | undefined): tld is Bend.Def {
-  return tld?.$ === "Def" && tld.v !== null;
+  return tld?.$ === "Def" && (stored_body(tld) ?? (tld.v !== null));
 }
 
 function fun_runs(tld: Bend.TLD | undefined): tld is Bend.Def {
@@ -1316,6 +1337,7 @@ export function io_run(book: Bend.Book, args: string[]): number {
 
 function file_new(book: Bend.Book, js: boolean): File {
   PROBES.length = 1;
+  JS_BODIES.clear();
   return {
     book,
     js,
@@ -3211,18 +3233,24 @@ function js_host(k: Name): string {
 // A module (for the .bend loader and -o <out>.mjs) roots and exports each
 // def a host can call.
 export function js_lib(book: Bend.Book, mod = false): string {
+  profile("jslib:start", {mod});
   FL = file_new(book, true);
   const outs = !mod ? null : [...new Set(FL.book.order)].filter((k) => {
     const t = FL.book.tlds[k];
     return done_live(t) && !def_foreign(t) && t.b !== true && t.x === 0
       && io_base(FL.book, t.T) === null;
   });
+  profile("analysis:start");
   file_book(outs ?? ["main"]);
+  profile("analysis:end", {funs:FL.funs.size, srcs:FL.srcs.size, probes:PROBES.length});
   const sc = scope_new();
   for (const [k, def] of done_defs(fun_runs)) {
     memo_gc();
+    profile("jsdef:start", {name:k, funs:FL.funs.size, probes:PROBES.length});
     js_def(sc, k, def);
+    profile("jsdef:end", {name:k, funs:FL.funs.size, probes:PROBES.length, lines:sc.seg.lines.length});
   }
+  profile("functions:end", {funs:FL.funs.size, srcs:FL.srcs.size, probes:PROBES.length, lines:sc.seg.lines.length});
   const srcs = effect_srcs(".js", "a foreign def without a .js import: ");
   const effs = srcs.map((t) => `(() => {\n${t}\n})();\n\n`).join("");
   const lib = outs === null ? "" : `export default {\n${outs.map((k) =>
@@ -3231,9 +3259,11 @@ export function js_lib(book: Bend.Book, mod = false): string {
   const jmps = new Map<Name, boolean>();
   const jmp = (k: Name): boolean => k === CLO_APPLY || memo(jmps, k, () =>
     (jmps.set(k, true), [...FL.tails.get(k) ?? []].some(jmp)));
+  profile("join:start", {spins:FL.spins.length});
   const funs = [sc.seg, ...FL.spins].flatMap((f) => seg_text(f.lines, 0))
     .join("\n").replace(/\x01([^\x02]*)\x02/g, (_, k) => jmp(k) ? "run_loop"
       : "");
+  profile("join:end", {characters:funs.length});
   return RUNTIME + effs + "// Program\n// =======\n\n" + [funs, ...[...FL.tabs]
     .map(([r, i]) => `const TAB_${i} = [${r}];`)].join("\n") + lib;
 }
