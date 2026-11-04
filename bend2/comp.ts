@@ -1394,6 +1394,7 @@ function scope_new(): Scope {
   };
 }
 
+const LASTDEF = process.env.BP_COMPILER_LASTDEF;
 function file_book(roots: Name[]): void {
   for (const k of OWNED) {
     if (FL.book.tlds[k] && !FL.book.tlds[k].b) {
@@ -1408,11 +1409,32 @@ function file_book(roots: Name[]): void {
     }
   }
   const queue = roots.slice();
+  const gcEvery = Number(process.env.BP_BEND_ANALYSIS_GC ?? 0);
+  let prevAt = performance.now();
+  let prevRss = 0;
+  let prevName = "";
+  let ticks = 0;
   for (const d of queue) {
     if (FL.srcs.has(d)) {
       continue;
     }
+    if (++ticks % 25 === 0) {
+      if (gcEvery > 0 && ticks % gcEvery === 0) {
+        Bun.gc(true);
+      }
+      profile("analysis:tick", {ticks, queue: queue.length, srcs: FL.srcs.size,
+        sites: FL.sites.size, bodies: JS_BODIES.size, funs: FL.funs.size});
+    }
     memo_gc();
+    if (LASTDEF) {
+      const now = performance.now();
+      const rss = Math.round(process.memoryUsage.rss() / 1048576);
+      if (now - prevAt > 300 || rss - prevRss > 100) {
+        fs.appendFileSync(LASTDEF + ".slow", `${prevName} ${Math.round(now - prevAt)}ms rss ${prevRss}->${rss}MB tick ${ticks} queue ${queue.length}\n`);
+      }
+      prevAt = now; prevRss = rss; prevName = d;
+      fs.writeFileSync(LASTDEF, `${d} ${ticks} ${rss}\n`);
+    }
     const tld = FL.book.tlds[d];
     FL.srcs.set(d, null);
     for (const x of tld?.$ === "ADT" ? tld.c : tld ? [tld] : []) {
@@ -1424,7 +1446,12 @@ function file_book(roots: Name[]): void {
     const deps = new Set<Name>();
     const refs = new Set<Name>();
     let flat = true;
-    term_any(fun_of(d).h!, (s, tail) => {
+    const t0 = performance.now();
+    const hd = fun_of(d).h!;
+    const t1 = performance.now();
+    let visits = 0;
+    term_any(hd, (s, tail) => {
+      visits++;
       if (s.$ === "Ann") {
         queue.push(...type_adts(s.T));
       }
@@ -1446,6 +1473,9 @@ function file_book(roots: Name[]): void {
       return false;
     });
     FL.srcs.set(d, flat ? deps : null);
+    if (LASTDEF && performance.now() - t0 > 300) {
+      fs.appendFileSync(LASTDEF + ".slow", `  SPLIT ${d} fun_of+h ${Math.round(t1 - t0)}ms term_any ${Math.round(performance.now() - t1)}ms visits ${visits} refs ${refs.size} deps ${deps.size}\n`);
+    }
     queue.push(...refs);
   }
 }
@@ -1891,7 +1921,48 @@ function memo<K, V>(m: Map<K, V>, k: K, f: (k: K) => V): V {
   return v;
 }
 
+// gc_guard forces a full collection when the process has grown by BP_BEND_GC_MB
+// (default 384, 0 = off) since the last one, checked every 8th call. Paged
+// runs make a lot of short-lived rehydrated terms; the lazy collector let
+// them reach 2 GB over the live set. Output is unaffected.
+// mem_settle runs a full collection, then waits for JSC's scavenger to hand
+// the freed pages back: a collection alone leaves them in the process (a
+// 760 MB heap freed still reads 760 MB RSS until the scavenger runs, about
+// 0.4 s later), so the cap sees memory the program no longer holds. It waits
+// at least 600 ms, then while RSS still falls by 16 MB a step, 2 s at most.
+export function mem_settle(): void {
+  Bun.gc(true);
+  const w = new Int32Array(new SharedArrayBuffer(4));
+  let last = process.memoryUsage.rss();
+  for (let ms = 100; ms <= 2000; ms += 100) {
+    Atomics.wait(w, 0, 0, 100);
+    const now = process.memoryUsage.rss();
+    if (ms >= 600 && last - now < 16 * 1048576) {
+      break;
+    }
+    last = now;
+  }
+}
+
+let GC_BASE = 0;
+let GC_CALLS = 0;
+function gc_guard(): void {
+  if (process.env.BP_BEND_PAGED !== "1" || ++GC_CALLS % 8 !== 0) {
+    return;
+  }
+  const lim = Number(process.env.BP_BEND_GC_MB ?? 384) * 1048576;
+  const now = process.memoryUsage.rss();
+  GC_BASE = Math.min(GC_BASE, now);
+  if (lim > 0 && now > GC_BASE + lim) {
+    const before = now;
+    mem_settle();
+    GC_BASE = process.memoryUsage.rss();
+    profile("gc:guard", {base: GC_BASE, before});
+  }
+}
+
 function memo_gc(): void {
+  gc_guard();
   Object.values(FL.memo).forEach((m) => m.clear());
 }
 
@@ -3266,6 +3337,110 @@ export function js_lib(book: Bend.Book, mod = false): string {
   profile("join:end", {characters:funs.length});
   return RUNTIME + effs + "// Program\n// =======\n\n" + [funs, ...[...FL.tabs]
     .map(([r, i]) => `const TAB_${i} = [${r}];`)].join("\n") + lib;
+}
+
+// js_lib_file is js_lib written to `out` as it is made: each def's text goes
+// to a spill file the moment it is generated (its line array freed), the
+// checked-term memos are dropped after each def, and the output is streamed
+// in blocks, so no joined copy of the program is ever built. The bytes are
+// those of js_lib. `tail` runs after the library with FL still live and
+// returns the text that follows it (js_book's main driver).
+export function js_lib_file(book: Bend.Book, out: string, mod = false,
+  tail: () => string = () => ""): void {
+  profile("jslib:start", {mod, file: true});
+  if (process.env.BP_BEND_PAGED === "1") {
+    mem_settle();
+    profile("emit:settled");
+  }
+  FL = file_new(book, true);
+  const outs = !mod ? null : [...new Set(FL.book.order)].filter((k) => {
+    const t = FL.book.tlds[k];
+    return done_live(t) && !def_foreign(t) && t.b !== true && t.x === 0
+      && io_base(FL.book, t.T) === null;
+  });
+  file_book(outs ?? ["main"]);
+  const spill = out + ".spill";
+  const sfd = fs.openSync(spill, "w");
+  const ofd = fs.openSync(out, "w");
+  try {
+    const sc = scope_new();
+    let tab = 0;
+    let first = true;
+    const flush = (lines: string[], fresh = false): void => {
+      if (lines.length === 0) {
+        return;
+      }
+      if (fresh) {
+        tab = 0;
+      }
+      const text = lines.map((l) => {
+        const o = "  ".repeat(tab -= Number(l.startsWith("}"))) + l;
+        tab += Number(l.endsWith("{"));
+        return o;
+      }).join("\n");
+      fs.writeSync(sfd, (first ? "" : "\n") + text);
+      first = false;
+      lines.length = 0;
+    };
+    for (const [k, def] of done_defs(fun_runs)) {
+      memo_gc();
+      js_def(sc, k, def);
+      flush(sc.seg.lines);
+      profile("jsdef:end", {name:k, funs:FL.funs.size, probes:PROBES.length});
+    }
+    const srcs = effect_srcs(".js", "a foreign def without a .js import: ");
+    const effs = srcs.map((t) => `(() => {\n${t}\n})();\n\n`).join("");
+    // js_host adds marshalling spins, so the spins are written after it
+    const lib = outs === null ? "" : `export default {\n${outs.map((k) =>
+      `  "${Bend.name_key(k)}": run_lib(${js_host(k)}, ${
+        fun_of(k).lays.length}),`).join("\n")}\n};\n`;
+    for (const f of FL.spins) {
+      flush(f.lines, true);
+    }
+    fs.closeSync(sfd);
+    const jmps = new Map<Name, boolean>();
+    const jmp = (k: Name): boolean => k === CLO_APPLY || memo(jmps, k, () =>
+      (jmps.set(k, true), [...FL.tails.get(k) ?? []].some(jmp)));
+    const put = (s: string): void => {
+      fs.writeSync(ofd, s);
+    };
+    put(RUNTIME + effs + "// Program\n// =======\n\n");
+    // the spill is read back in blocks cut at a newline; a \x01..\x02 mark
+    // never holds one
+    const rfd = fs.openSync(spill, "r");
+    const buf = Buffer.allocUnsafe(8 << 20);
+    let carry = Buffer.alloc(0);
+    for (;;) {
+      const n = fs.readSync(rfd, buf, 0, buf.length, null);
+      const all = n === 0 ? carry : Buffer.concat([carry, buf.subarray(0, n)]);
+      const cut = n === 0 ? all.length : all.lastIndexOf(10) + 1;
+      carry = Buffer.from(all.subarray(cut));
+      if (cut > 0) {
+        put(all.subarray(0, cut).toString("utf8").replace(
+          /\x01([^\x02]*)\x02/g, (_, k) => jmp(k) ? "run_loop" : ""));
+      }
+      if (n === 0) {
+        break;
+      }
+    }
+    fs.closeSync(rfd);
+    put([...FL.tabs].map(([r, i]) => `\nconst TAB_${i} = [${r}];`).join("")
+      + lib + tail());
+  } finally {
+    fs.closeSync(ofd);
+    fs.rmSync(spill, { force: true });
+  }
+  profile("jslib:end", {file: true});
+}
+
+export function js_book_file(book: Bend.Book, out: string): void {
+  js_lib_file(book, out, false, () => {
+    const show = show_main();
+    return `\n${RUNTIME_MAIN}\ncli(process.argv.slice(1));\nio_exit(${
+      js_sat("main")}, ${JSON.stringify(show && [show.map((c) =>
+        typeof c === "string" ? 0 : c), show.flatMap((c) =>
+        typeof c === "string" ? [Bend.name_key(c)] : [])])});`;
+  });
 }
 
 export function js_book(book: Bend.Book): string {

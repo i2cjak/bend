@@ -5,6 +5,7 @@ import { heapStats } from "bun:jsc";
 const target = process.env.BP_COMPILER_PROFILE;
 const started = performance.now();
 let sampledRSS = 0;
+let lastTick = -1e9;
 let cgroup: string | null = null;
 try {
   const group = fs.readFileSync('/proc/self/cgroup', 'utf8').split('\n')
@@ -27,7 +28,10 @@ export function profile(phase: string, details: Record<string, unknown> = {}): v
   if (!target) return;
   const memory = process.memoryUsage();
   const perDefinition = phase.startsWith("jsdef:");
-  if (perDefinition && memory.rss < sampledRSS + 32 * 1024 * 1024) return;
+  if (phase === "analysis:tick") {
+    if (performance.now() - lastTick < 2000) return;
+    lastTick = performance.now();
+  } else if (perDefinition && memory.rss < sampledRSS + 32 * 1024 * 1024) return;
   sampledRSS = Math.max(sampledRSS, memory.rss);
   const heap = !perDefinition && process.env.BP_COMPILER_CENSUS === "1" ? heapStats() : null;
   const usage = process.resourceUsage();
@@ -37,6 +41,7 @@ export function profile(phase: string, details: Record<string, unknown> = {}): v
     heap_used_bytes: memory.heapUsed, heap_total_bytes: memory.heapTotal,
     external_bytes: memory.external, jsc_heap_bytes: heap?.heapSize,
     jsc_capacity_bytes: heap?.heapCapacity, jsc_extra_bytes: heap?.extraMemorySize,
-    jsc_objects: heap?.objectCount, cgroup_memory: groupMemory(), ...details,
+    jsc_objects: heap?.objectCount,
+    jsc_top: heap ? Object.entries(heap.objectTypeCounts as Record<string, number>).sort((a, b) => b[1] - a[1]).slice(0, 14) : undefined, cgroup_memory: groupMemory(), ...details,
   }) + "\n");
 }

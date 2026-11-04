@@ -365,9 +365,9 @@ function path_real(p: string): string {
 function cli_emit(book: Bend.Book, out: string): void {
   profile("emit:start", {out});
   if (out.endsWith(".mjs")) {
-    fs.writeFileSync(out, Comp.js_lib(book, true));
+    Comp.js_lib_file(book, out, true);
   } else if (/\.c?js$/.test(out)) {
-    fs.writeFileSync(out, Comp.js_book(book));
+    Comp.js_book_file(book, out);
   } else if (out.endsWith(".c")) {
     fs.writeFileSync(out, Comp.compile_book(book));
   } else if (out.endsWith(".bendtt")) {

@@ -280,3 +280,8 @@ Thanks to [Ayush Somani](https://ayushsomani.me/) for reserving the
 ## Experimental: paged checked bodies
 
 Based on Bend 2.0.36. This opt-in research prototype pages checked terms and revalidates backing data; it is not a release compiler or proof cache. A focused emit and a mobile check passed with the experimental toolchain; mobile used about 2.6 GiB RSS but took 149.6 seconds in the V21 trial. Full hub and web trials did not qualify: the hub timed out and web was OOM-killed under a 3.7 GB compiler cap. The post-trial revalidation correction in this branch has not itself received those full runs.
+
+
+## Experimental: streaming JavaScript emit
+
+This branch combines the experimental paged compiler with streaming JavaScript emission and diagnostic guards. Small JS and MJS controls, including a 1.96 MB focused module, matched saved output bytes. No matched upstream before/after peak-RSS or wall-time improvement has been established. A full web trial of a later related composition was OOM-killed during analysis under the 3.7 GB compiler cap; this branch is experimental and not release-qualified.
