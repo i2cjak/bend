@@ -3210,7 +3210,8 @@ function js_host(k: Name): string {
 
 // A module (for the .bend loader and -o <out>.mjs) roots and exports each
 // def a host can call.
-export function js_lib(book: Bend.Book, mod = false): string {
+export function js_lib(book: Bend.Book, mod = false,
+  write?: (chunk: string) => void): string {
   FL = file_new(book, true);
   const outs = !mod ? null : [...new Set(FL.book.order)].filter((k) => {
     const t = FL.book.tlds[k];
@@ -3231,6 +3232,37 @@ export function js_lib(book: Bend.Book, mod = false): string {
   const jmps = new Map<Name, boolean>();
   const jmp = (k: Name): boolean => k === CLO_APPLY || memo(jmps, k, () =>
     (jmps.set(k, true), [...FL.tails.get(k) ?? []].some(jmp)));
+  if (write) {
+    write(RUNTIME + effs + "// Program\n// =======\n\n");
+    let first = true;
+    let pending = "";
+    const line = (text: string) => {
+      pending += (first ? "" : "\n") + text;
+      first = false;
+      if (pending.length >= 65536) {
+        write(pending);
+        pending = "";
+      }
+    };
+    for (const seg of [sc.seg, ...FL.spins]) {
+      let tab = 0;
+      for (const raw of seg.lines) {
+        const text = "  ".repeat(tab -= Number(raw.startsWith("}"))) + raw;
+        tab += Number(raw.endsWith("{"));
+        line(text.replace(/\x01([^\x02]*)\x02/g, (_, k) => jmp(k) ? "run_loop" : ""));
+      }
+    }
+    // join([funs, ...tabs]) includes an empty first field when no function
+    // text exists; preserve that separator as well as every trailing line.
+    if (first) {
+      first = false;
+    }
+    for (const [r, i] of FL.tabs) {
+      line(`const TAB_${i} = [${r}];`);
+    }
+    write(pending + lib);
+    return "";
+  }
   const funs = [sc.seg, ...FL.spins].flatMap((f) => seg_text(f.lines, 0))
     .join("\n").replace(/\x01([^\x02]*)\x02/g, (_, k) => jmp(k) ? "run_loop"
       : "");
