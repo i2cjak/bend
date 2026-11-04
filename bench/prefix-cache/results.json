@@ -1,0 +1,209 @@
+{
+  "status": "rejected experiment, no warm application qualification",
+  "performance_source_sha256": "cd714fbf3766b90aec0dacca7b5be17a563b18df24f1980c29afcbc527bc2d28",
+  "final_guard_source_sha256": "9f46158d8f29c3e07545388e243b47bcb175a9fe3d557bff45b31c909b3df467",
+  "controls": {
+    "comparisons": 60,
+    "differences": 0,
+    "actual_cache_hits": 22
+  },
+  "runs": [
+    {
+      "case": "stock-cold",
+      "scope": {
+        "rc": 0,
+        "properties": "Result=success\nMemoryPeak=[not set]\n"
+      },
+      "receipt": {
+        "rc": 0,
+        "wall_seconds": 5.463141695999994,
+        "before": {
+          "memory.max": "3699998720",
+          "memory.swap.max": "0",
+          "memory.peak": "7933952",
+          "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0"
+        },
+        "after": {
+          "memory.max": "3699998720",
+          "memory.swap.max": "0",
+          "memory.peak": "3036811264",
+          "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0"
+        }
+      },
+      "results": {
+        "mode": "stock",
+        "temperature": "cold",
+        "rows": [
+          {
+            "name": "cold",
+            "reused": 0,
+            "total": 8856,
+            "reason": "stock",
+            "seconds": {
+              "parse": 0.771020502,
+              "lookup": 0,
+              "check": 0.779202521
+            },
+            "wall_seconds": 1.5502360669999997,
+            "rss": 866889728
+          }
+        ],
+        "emit_seconds": 3.8065920990000004,
+        "sha256": "5983b0f6f4b20c1e4f820121b744d4f18c64ee174be4aefdf96b89bed7868c06",
+        "output_code_units": 4922039,
+        "output_utf8_bytes": 4967012
+      }
+    },
+    {
+      "case": "cache-cold",
+      "scope": {
+        "rc": 0,
+        "properties": "Result=success\nMemoryPeak=[not set]\n"
+      },
+      "receipt": {
+        "rc": 0,
+        "wall_seconds": 9.05631823600001,
+        "before": {
+          "memory.max": "3699998720",
+          "memory.swap.max": "0",
+          "memory.peak": "8183808",
+          "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0"
+        },
+        "after": {
+          "memory.max": "3699998720",
+          "memory.swap.max": "0",
+          "memory.peak": "3420622848",
+          "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0"
+        }
+      },
+      "results": {
+        "mode": "cache",
+        "temperature": "cold",
+        "rows": [
+          {
+            "name": "cold",
+            "reused": 0,
+            "total": 8856,
+            "reason": "cold",
+            "seconds": {
+              "parse": 0.756280135,
+              "lookup": 0.19553769899999998,
+              "check": 4.060403428
+            },
+            "wall_seconds": 5.012846773000001,
+            "rss": 1992409088
+          }
+        ],
+        "emit_seconds": 3.943306213,
+        "sha256": "5983b0f6f4b20c1e4f820121b744d4f18c64ee174be4aefdf96b89bed7868c06",
+        "output_code_units": 4922039,
+        "output_utf8_bytes": 4967012
+      }
+    },
+    {
+      "case": "stock-warm",
+      "scope": {
+        "rc": 0,
+        "properties": "Result=success\nMemoryPeak=[not set]\n"
+      },
+      "receipt": {
+        "rc": 0,
+        "wall_seconds": 11.732390581000004,
+        "before": {
+          "memory.max": "3699998720",
+          "memory.swap.max": "0",
+          "memory.peak": "7983104",
+          "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0"
+        },
+        "after": {
+          "memory.max": "3699998720",
+          "memory.swap.max": "0",
+          "memory.peak": "3308294144",
+          "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0"
+        }
+      },
+      "results": {
+        "mode": "stock",
+        "temperature": "warm",
+        "rows": [
+          {
+            "name": "cold",
+            "reused": 0,
+            "total": 8856,
+            "reason": "stock",
+            "seconds": {
+              "parse": 0.718033944,
+              "lookup": 0,
+              "check": 0.723188004
+            },
+            "wall_seconds": 1.441234681,
+            "rss": 869933056
+          },
+          {
+            "name": "reuse-1",
+            "reused": 0,
+            "total": 8856,
+            "reason": "stock",
+            "seconds": {
+              "parse": 0.610248102,
+              "lookup": 0,
+              "check": 0.7034717549999996
+            },
+            "wall_seconds": 1.3137426090000002,
+            "rss": 1514614784
+          },
+          {
+            "name": "reuse-2",
+            "reused": 0,
+            "total": 8856,
+            "reason": "stock",
+            "seconds": {
+              "parse": 0.6769385810000004,
+              "lookup": 0,
+              "check": 0.5095322539999997
+            },
+            "wall_seconds": 1.1864907120000003,
+            "rss": 2197540864
+          },
+          {
+            "name": "body-edit",
+            "reused": 0,
+            "total": 8856,
+            "reason": "stock",
+            "seconds": {
+              "parse": 0.5802762919999995,
+              "lookup": 0,
+              "check": 0.5021016349999999
+            },
+            "wall_seconds": 1.0823989069999997,
+            "rss": 2415955968
+          },
+          {
+            "name": "original-after-edit",
+            "reused": 0,
+            "total": 8856,
+            "reason": "stock",
+            "seconds": {
+              "parse": 0.6229650929999998,
+              "lookup": 0,
+              "check": 0.4970207280000004
+            },
+            "wall_seconds": 1.1201160549999996,
+            "rss": 2359615488
+          }
+        ],
+        "emit_seconds": 4.364718141,
+        "sha256": "5983b0f6f4b20c1e4f820121b744d4f18c64ee174be4aefdf96b89bed7868c06",
+        "output_code_units": 4922039,
+        "output_utf8_bytes": 4967012
+      }
+    },
+    {
+      "case": "cache-warm",
+      "scope": {
+        "rc": -15,
+        "properties": "Result=oom-kill\nMemoryPeak=3699998720\n"
+      }
+    }
+  ]
+}
