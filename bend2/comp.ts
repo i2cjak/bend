@@ -749,8 +749,13 @@ function term_kids(tm: HTerm): HTerm[] {
 function term_any(t: HTerm, p: (s: HTerm, tail: boolean) => boolean,
   tail = true): boolean {
   const s = term_force(t);
+  // A successful predicate has already answered the existential query.
+  // In particular, do not open a lambda's children after reaching a bound.
+  if (p(s, tail)) {
+    return true;
+  }
   const kids = term_kids(s);
-  return p(s, tail) || kids.some((x, i) => term_any(x, p, tail && (s.$
+  return kids.some((x, i) => term_any(x, p, tail && (s.$
     === "Let" ? i === kids.length - 1 : "Ann Lam Mat Rwt".includes(s.$))));
 }
 
