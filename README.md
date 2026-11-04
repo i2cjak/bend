@@ -275,3 +275,8 @@ can add it here.
 
 Thanks to [Ayush Somani](https://ayushsomani.me/) for reserving the
 `bend-lang` name for us.
+
+
+## Experimental: module-prefix checking
+
+Based on Bend 2.0.36. This opt-in research patch evolves the original module-prefix experiment with paged storage; it does not modify the checker kernel or establish separate compilation. Small typed controls passed. An earlier compact-interface experiment hit a 6,000,000,000-byte limit after 152 modules (285.8 seconds), with no hub output; that result is for the earlier revision, not a measurement of this exact snapshot. Full hub and web builds remain unqualified.
